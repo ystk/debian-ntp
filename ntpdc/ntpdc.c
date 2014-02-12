@@ -18,6 +18,7 @@
 #include "isc/result.h"
 #include <ssl_applink.c>
 
+#include "ntp_libopts.h"
 #include "ntpdc-opts.h"
 
 #ifdef SYS_WINNT
@@ -76,11 +77,7 @@ static	int	findcmd		(char *, struct xcmd *, struct xcmd *, struct xcmd **);
 static	int	getarg		(char *, int, arg_v *);
 static	int	getnetnum	(const char *, sockaddr_u *, char *, int);
 static	void	help		(struct parse *, FILE *);
-#ifdef QSORT_USES_VOID_P
 static	int	helpsort	(const void *, const void *);
-#else
-static	int	helpsort	(char **, char **);
-#endif
 static	void	printusage	(struct xcmd *, FILE *);
 static	void	timeout		(struct parse *, FILE *);
 static	void	my_delay	(struct parse *, FILE *);
@@ -294,7 +291,7 @@ ntpdcmain(
 	progname = argv[0];
 
 	{
-		int optct = optionProcess(&ntpdcOptions, argc, argv);
+		int optct = ntpOptionProcess(&ntpdcOptions, argc, argv);
 		argc -= optct;
 		argv += optct;
 	}
@@ -484,7 +481,7 @@ openhost(
 	hints.ai_family = ai_fam_templ;
 	hints.ai_protocol = IPPROTO_UDP;
 	hints.ai_socktype = SOCK_DGRAM;
-	hints.ai_flags = AI_NUMERICHOST;
+	hints.ai_flags = Z_AI_NUMERICHOST;
 
 	a_info = getaddrinfo(hname, service, &hints, &ai);
 	if (a_info == EAI_NONAME
@@ -1478,34 +1475,42 @@ getnetnum(
 	int af
 	)
 {
-	int sockaddr_len;
 	struct addrinfo hints, *ai = NULL;
 
-	sockaddr_len = SIZEOF_SOCKADDR(af);
-	memset((char *)&hints, 0, sizeof(struct addrinfo));
+	ZERO(hints);
 	hints.ai_flags = AI_CANONNAME;
 #ifdef AI_ADDRCONFIG
 	hints.ai_flags |= AI_ADDRCONFIG;
 #endif
 	
-	/* decodenetnum only works with addresses */
+	/*
+	 * decodenetnum only works with addresses, but handles syntax
+	 * that getaddrinfo doesn't:  [2001::1]:1234
+	 */
 	if (decodenetnum(hname, num)) {
-		if (fullhost != 0) {
-			getnameinfo(&num->sa, sockaddr_len, 
-				    fullhost, sizeof(fullhost), NULL, 0, 
-				    NI_NUMERICHOST); 
-		}
+		if (fullhost != NULL)
+			getnameinfo(&num->sa, SOCKLEN(num), fullhost,
+				    LENHOSTNAME, NULL, 0, 0);
 		return 1;
 	} else if (getaddrinfo(hname, "ntp", &hints, &ai) == 0) {
-		memmove((char *)num, ai->ai_addr, ai->ai_addrlen);
-		if (fullhost != 0)
-			(void) strcpy(fullhost, ai->ai_canonname);
+		NTP_INSIST(sizeof(*num) >= ai->ai_addrlen);
+		memcpy(num, ai->ai_addr, ai->ai_addrlen);
+		if (fullhost != NULL) {
+			if (ai->ai_canonname != NULL) {
+				strncpy(fullhost, ai->ai_canonname,
+					LENHOSTNAME);
+				fullhost[LENHOSTNAME - 1] = '\0';
+			} else {
+				getnameinfo(&num->sa, SOCKLEN(num),
+					    fullhost, LENHOSTNAME, NULL,
+					    0, 0);
+			}
+		}
 		return 1;
-	} else {
-		(void) fprintf(stderr, "***Can't find host %s\n", hname);
-		return 0;
 	}
-	/*NOTREACHED*/
+	fprintf(stderr, "***Can't find host %s\n", hname);
+
+	return 0;
 }
 
 /*
@@ -1542,58 +1547,51 @@ help(
 	struct xcmd *xcp;
 	char *cmd;
 	const char *list[100];
-	int word, words;     
-        int row, rows;
-	int col, cols;
+	size_t word, words;
+	size_t row, rows;
+	size_t col, cols;
+	size_t length;
 
 	if (pcmd->nargs == 0) {
 		words = 0;
 		for (xcp = builtins; xcp->keyword != 0; xcp++) {
 			if (*(xcp->keyword) != '?')
-			    list[words++] = xcp->keyword;
+				list[words++] = xcp->keyword;
 		}
-                for (xcp = opcmds; xcp->keyword != 0; xcp++)
-		    list[words++] = xcp->keyword;
+		for (xcp = opcmds; xcp->keyword != 0; xcp++)
+			list[words++] = xcp->keyword;
 
-		qsort(
-#ifdef QSORT_USES_VOID_P
-		    (void *)
-#else
-		    (char *)
-#endif
-			(list), (size_t)(words), sizeof(char *), helpsort);
+		qsort((void *)list, (size_t)words, sizeof(list[0]),
+		      helpsort);
 		col = 0;
 		for (word = 0; word < words; word++) {
-			int length = strlen(list[word]);
-			if (col < length) {
-			    col = length;
-                        }
+			length = strlen(list[word]);
+			col = max(col, length);
 		}
 
 		cols = SCREENWIDTH / ++col;
-                rows = (words + cols - 1) / cols;
+		rows = (words + cols - 1) / cols;
 
-		(void) fprintf(fp, "ntpdc commands:\n");
+		fprintf(fp, "ntpdc commands:\n");
 
 		for (row = 0; row < rows; row++) {
-                        for (word = row; word < words; word += rows) {
-				(void) fprintf(fp, "%-*.*s", col, col-1, list[word]);
-                        }
-			(void) fprintf(fp, "\n");
+			for (word = row; word < words; word += rows)
+				fprintf(fp, "%-*.*s", col, col-1, list[word]);
+			fprintf(fp, "\n");
 		}
 	} else {
 		cmd = pcmd->argval[0].string;
 		words = findcmd(cmd, builtins, opcmds, &xcp);
 		if (words == 0) {
-			(void) fprintf(stderr,
-				       "Command `%s' is unknown\n", cmd);
+			fprintf(stderr,
+				"Command `%s' is unknown\n", cmd);
 			return;
 		} else if (words >= 2) {
-			(void) fprintf(stderr,
-				       "Command `%s' is ambiguous\n", cmd);
+			fprintf(stderr,
+				"Command `%s' is ambiguous\n", cmd);
 			return;
 		}
-		(void) fprintf(fp, "function: %s\n", xcp->comment);
+		fprintf(fp, "function: %s\n", xcp->comment);
 		printusage(xcp, fp);
 	}
 }
@@ -1602,28 +1600,17 @@ help(
 /*
  * helpsort - do hostname qsort comparisons
  */
-#ifdef QSORT_USES_VOID_P
 static int
 helpsort(
 	const void *t1,
 	const void *t2
 	)
 {
-	char const * const * name1 = (char const * const *)t1;
-	char const * const * name2 = (char const * const *)t2;
+	const char * const *	name1 = t1;
+	const char * const *	name2 = t2;
 
 	return strcmp(*name1, *name2);
 }
-#else
-static int
-helpsort(
-	char **name1,
-	char **name2
-	)
-{
-	return strcmp(*name1, *name2);
-}
-#endif
 
 
 /*
@@ -1976,10 +1963,11 @@ getkeyid(
 	const char *keyprompt
 	)
 {
-	register char *p;
-	register int c;
+	int c;
 	FILE *fi;
 	char pbuf[20];
+	size_t i;
+	size_t ilim;
 
 #ifndef SYS_WINNT
 	if ((fi = fdopen(open("/dev/tty", 2), "r")) == NULL)
@@ -1987,15 +1975,16 @@ getkeyid(
 	if ((fi = _fdopen(open("CONIN$", _O_TEXT), "r")) == NULL)
 #endif /* SYS_WINNT */
 		fi = stdin;
-	    else
+	else
 		setbuf(fi, (char *)NULL);
 	fprintf(stderr, "%s", keyprompt); fflush(stderr);
-	for (p=pbuf; (c = getc(fi))!='\n' && c!=EOF;) {
-		if (p < &pbuf[18])
-		    *p++ = (char) c;
-	}
-	*p = '\0';
+	for (i = 0, ilim = COUNTOF(pbuf) - 1;
+	     i < ilim && (c = getc(fi)) != '\n' && c != EOF;
+	     )
+		pbuf[i++] = (char)c;
+	pbuf[i] = '\0';
 	if (fi != stdin)
-	    fclose(fi);
-	return (u_int32)atoi(pbuf);
+		fclose(fi);
+
+	return (u_long) atoi(pbuf);
 }

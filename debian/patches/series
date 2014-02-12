@@ -7,5 +7,5 @@ ntpd-ni-maxhost.patch
 openssl-disable-check.patch
 libedit.patch
 autotools.patch
-mod_nano.patch
-nanokernel-status.patch
+format-security.patch
+sntp-manpage.patch

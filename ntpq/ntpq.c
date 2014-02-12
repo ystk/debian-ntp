@@ -23,6 +23,7 @@
 #include "isc/result.h"
 #include <ssl_applink.c>
 
+#include "ntp_libopts.h"
 #include "ntpq-opts.h"
 
 #ifdef SYS_WINNT
@@ -244,7 +245,7 @@ int		ntpqmain	(int,	char **);
 static	int	openhost	(const char *);
 
 static	int	sendpkt		(void *, size_t);
-static	int	getresponse	(int, int, u_short *, int *, char **, int);
+static	int	getresponse	(int, int, u_short *, int *, const char **, int);
 static	int	sendrequest	(int, int, int, int, char *);
 static	char *	tstflags	(u_long);
 #ifndef BUILD_AS_LIB
@@ -260,11 +261,7 @@ static	int	findcmd		(char *, struct xcmd *, struct xcmd *, struct xcmd **);
 static	int	rtdatetolfp	(char *, l_fp *);
 static	int	decodearr	(char *, int *, l_fp *);
 static	void	help		(struct parse *, FILE *);
-#ifdef QSORT_USES_VOID_P
 static	int	helpsort	(const void *, const void *);
-#else
-static	int	helpsort	(char **, char **);
-#endif
 static	void	printusage	(struct xcmd *, FILE *);
 static	void	timeout		(struct parse *, FILE *);
 static	void	auth_delay	(struct parse *, FILE *);
@@ -285,17 +282,13 @@ static	void	warning		(const char *, const char *, const char *);
 static	void	error		(const char *, const char *, const char *);
 static	u_long	getkeyid	(const char *);
 static	void	atoascii	(const char *, size_t, char *, size_t);
-static	void	cookedprint	(int, int, char *, int, int, FILE *);
-static	void	rawprint	(int, int, char *, int, int, FILE *);
+static	void	cookedprint	(int, int, const char *, int, int, FILE *);
+static	void	rawprint	(int, int, const char *, int, int, FILE *);
 static	void	startoutput	(void);
 static	void	output		(FILE *, char *, char *);
 static	void	endoutput	(FILE *);
 static	void	outputarr	(FILE *, char *, int, l_fp *);
-#ifdef QSORT_USES_VOID_P
 static	int	assoccmp	(const void *, const void *);
-#else
-static	int	assoccmp	(struct association *, struct association *);
-#endif /* sgi || bsdi */
 void	ntpq_custom_opt_handler	(tOptions *, tOptDesc *);
 
 
@@ -386,6 +379,7 @@ struct sock_timeval tvout = { DEFTIMEOUT, 0 };	/* time out for reads */
 struct sock_timeval tvsout = { DEFSTIMEOUT, 0 };/* secondary time out */
 l_fp delay_time;				/* delay time */
 char currenthost[LENHOSTNAME];			/* current host name */
+int currenthostisnum;				/* is prior text from IP? */
 struct sockaddr_in hostaddr = { 0 };		/* host address */
 int showhostnames = 1;				/* show host names by default */
 
@@ -523,7 +517,7 @@ ntpqmain(
 	progname = argv[0];
 
 	{
-		int optct = optionProcess(&ntpqOptions, argc, argv);
+		int optct = ntpOptionProcess(&ntpqOptions, argc, argv);
 		argc -= optct;
 		argv += optct;
 	}
@@ -664,11 +658,11 @@ openhost(
 	 * give it an IPv4 address to lookup.
 	 */
 	strcpy(service, "ntp");
-	memset((char *)&hints, 0, sizeof(struct addrinfo));
+	ZERO(hints);
 	hints.ai_family = ai_fam_templ;
 	hints.ai_protocol = IPPROTO_UDP;
 	hints.ai_socktype = SOCK_DGRAM;
-	hints.ai_flags = AI_NUMERICHOST;
+	hints.ai_flags = Z_AI_NUMERICHOST;
 
 	a_info = getaddrinfo(hname, service, &hints, &ai);
 	if (a_info == EAI_NONAME
@@ -694,13 +688,14 @@ openhost(
 		return 0;
 	}
 
-	if (ai->ai_canonname == NULL) {
+	if (!showhostnames || ai->ai_canonname == NULL) {
 		strncpy(temphost, 
 			stoa((sockaddr_u *)ai->ai_addr),
 			LENHOSTNAME);
-
+		currenthostisnum = TRUE;
 	} else {
 		strncpy(temphost, ai->ai_canonname, LENHOSTNAME);
+		currenthostisnum = FALSE;
 	}
 	temphost[LENHOSTNAME-1] = '\0';
 
@@ -821,7 +816,7 @@ getresponse(
 	int associd,
 	u_short *rstatus,
 	int *rsize,
-	char **rdata,
+	const char **rdata,
 	int timeo
 	)
 {
@@ -831,11 +826,16 @@ getresponse(
 	u_short counts[MAXFRAGS+1];
 	u_short offset;
 	u_short count;
-	int numfrags;
+	size_t numfrags;
+	size_t f;
+	size_t ff;
 	int seenlastfrag;
 	int shouldbesize;
 	fd_set fds;
 	int n;
+	int len;
+	int first;
+	char *data;
 
 	/*
 	 * This is pretty tricky.  We may get between 1 and MAXFRAG packets
@@ -846,7 +846,7 @@ getresponse(
 	 */
 	*rsize = 0;
 	if (rstatus)
-	    *rstatus = 0;
+		*rstatus = 0;
 	*rdata = (char *)pktdata;
 
 	numfrags = 0;
@@ -856,17 +856,17 @@ getresponse(
 
 	/*
 	 * Loop until we have an error or a complete response.  Nearly all
-	 * aths to loop again use continue.
+	 * code paths to loop again use continue.
 	 */
 	for (;;) {
 
 		if (numfrags == 0)
-		    tvo = tvout;
+			tvo = tvout;
 		else
-		    tvo = tvsout;
+			tvo = tvsout;
 		
 		FD_SET(sockfd, &fds);
-		n = select(sockfd+1, &fds, (fd_set *)0, (fd_set *)0, &tvo);
+		n = select(sockfd + 1, &fds, NULL, NULL, &tvo);
 
 		if (n == -1) {
 			warning("select fails", "", "");
@@ -878,27 +878,32 @@ getresponse(
 			 */
 			if (numfrags == 0) {
 				if (timeo)
-				    (void) fprintf(stderr,
-						   "%s: timed out, nothing received\n",
-						   currenthost);
+					fprintf(stderr,
+						"%s: timed out, nothing received\n",
+						currenthost);
 				return ERR_TIMEOUT;
-			} else {
-				if (timeo)
-				    (void) fprintf(stderr,
-						   "%s: timed out with incomplete data\n",
-						   currenthost);
-				if (debug) {
-					printf("Received fragments:\n");
-					for (n = 0; n < numfrags; n++)
-					    printf("%4d %d\n", offsets[n],
-						   counts[n]);
-					if (seenlastfrag)
-					    printf("last fragment received\n");
-					else
-					    printf("last fragment not received\n");
-				}
-				return ERR_INCOMPLETE;
 			}
+			if (timeo)
+				fprintf(stderr,
+					"%s: timed out with incomplete data\n",
+					currenthost);
+			if (debug) {
+				fprintf(stderr,
+					"ERR_INCOMPLETE: Received fragments:\n");
+				for (f = 0; f < numfrags; f++)
+					fprintf(stderr,
+						"%2u: %5d %5d\t%3d octets\n",
+						f, offsets[f],
+						offsets[f] +
+						counts[f],
+						counts[f]);
+				fprintf(stderr,
+					"last fragment %sreceived\n",
+					(seenlastfrag)
+					    ? ""
+					    : "not ");
+			}
+			return ERR_INCOMPLETE;
 		}
 
 		n = recv(sockfd, (char *)&rpkt, sizeof(rpkt), 0);
@@ -908,8 +913,9 @@ getresponse(
 		}
 
 		if (debug >= 4) {
-			int len = n, first = 8;
-			char *data = (char *)&rpkt;
+			len = n;
+			first = 8;
+			data = (char *)&rpkt;
 
 			printf("Packet data:\n");
 			while (len-- > 0) {
@@ -927,25 +933,25 @@ getresponse(
 		 */
 		if (n < CTL_HEADER_LEN) {
 			if (debug)
-			    printf("Short (%d byte) packet received\n", n);
+				printf("Short (%d byte) packet received\n", n);
 			continue;
 		}
 		if (PKT_VERSION(rpkt.li_vn_mode) > NTP_VERSION
 		    || PKT_VERSION(rpkt.li_vn_mode) < NTP_OLDVERSION) {
 			if (debug)
-			    printf("Packet received with version %d\n",
-				   PKT_VERSION(rpkt.li_vn_mode));
+				printf("Packet received with version %d\n",
+				       PKT_VERSION(rpkt.li_vn_mode));
 			continue;
 		}
 		if (PKT_MODE(rpkt.li_vn_mode) != MODE_CONTROL) {
 			if (debug)
-			    printf("Packet received with mode %d\n",
-				   PKT_MODE(rpkt.li_vn_mode));
+				printf("Packet received with mode %d\n",
+				       PKT_MODE(rpkt.li_vn_mode));
 			continue;
 		}
 		if (!CTL_ISRESPONSE(rpkt.r_m_e_op)) {
 			if (debug)
-			    printf("Received request packet, wanted response\n");
+				printf("Received request packet, wanted response\n");
 			continue;
 		}
 
@@ -955,9 +961,8 @@ getresponse(
 		 */
 		if (ntohs(rpkt.sequence) != sequence) {
 			if (debug)
-			    printf(
-				    "Received sequnce number %d, wanted %d\n",
-				    ntohs(rpkt.sequence), sequence);
+				printf("Received sequnce number %d, wanted %d\n",
+				       ntohs(rpkt.sequence), sequence);
 			continue;
 		}
 		if (CTL_OP(rpkt.r_m_e_op) != opcode) {
@@ -1070,7 +1075,7 @@ getresponse(
 		}
 
 		if (debug >= 2)
-		    printf("Got packet, size = %d\n", n);
+			printf("Got packet, size = %d\n", n);
 		if ((int)count > (n - CTL_HEADER_LEN)) {
 			if (debug)
 				printf("Received count of %d octets, "
@@ -1080,18 +1085,18 @@ getresponse(
 		}
 		if (count == 0 && CTL_ISMORE(rpkt.r_m_e_op)) {
 			if (debug)
-			    printf("Received count of 0 in non-final fragment\n");
+				printf("Received count of 0 in non-final fragment\n");
 			continue;
 		}
 		if (offset + count > sizeof(pktdata)) {
 			if (debug)
-			    printf("Offset %d, count %d, too big for buffer\n",
-				   offset, count);
+				printf("Offset %d, count %d, too big for buffer\n",
+				       offset, count);
 			return ERR_TOOMUCH;
 		}
 		if (seenlastfrag && !CTL_ISMORE(rpkt.r_m_e_op)) {
 			if (debug)
-			    printf("Received second last fragment packet\n");
+				printf("Received second last fragment packet\n");
 			continue;
 		}
 
@@ -1100,11 +1105,12 @@ getresponse(
 		 * overlap anything.
 		 */
 		if (debug >= 2)
-		    printf("Packet okay\n");;
+			printf("Packet okay\n");;
 
 		if (numfrags > (MAXFRAGS - 1)) {
 			if (debug)
-			    printf("Number of fragments exceeds maximum\n");
+				printf("Number of fragments exceeds maximum %d\n",
+				       MAXFRAGS - 1);
 			return ERR_TOOMUCH;
 		}
 
@@ -1112,56 +1118,41 @@ getresponse(
 		 * Find the position for the fragment relative to any
 		 * previously received.
 		 */
-		for (n = 0; 
-		     n < numfrags && offsets[n] < offset; 
-		     n++) {
+		for (f = 0; 
+		     f < numfrags && offsets[f] < offset; 
+		     f++) {
 			/* empty body */ ;
 		}
 
-		if (n < numfrags && offset == offsets[n]) {
+		if (f < numfrags && offset == offsets[f]) {
 			if (debug)
-				printf("duplicate %u octets at %u "
-					"ignored, prior %u at %u\n",
-					count,
-					offset,
-					counts[n],
-					offsets[n]
-					);
+				printf("duplicate %u octets at %u ignored, prior %u at %u\n",
+				       count, offset, counts[f],
+				       offsets[f]);
 			continue;
 		}
 
-		if (n > 0 && (offsets[n-1] + counts[n-1]) > offset) {
+		if (f > 0 && (offsets[f-1] + counts[f-1]) > offset) {
 			if (debug)
-				printf("received frag at %u overlaps "
-					"with %u octet frag at %u\n",
-					offset,
-					counts[n-1],
-					offsets[n-1]
-					);
+				printf("received frag at %u overlaps with %u octet frag at %u\n",
+				       offset, counts[f-1],
+				       offsets[f-1]);
 			continue;
 		}
 
-		if (n < numfrags && (offset + count) > offsets[n]) {
+		if (f < numfrags && (offset + count) > offsets[f]) {
 			if (debug)
-				printf("received %u octet frag at %u "
-					"overlaps with frag at %u\n",
-					count,
-					offset,
-					offsets[n]
-					);
+				printf("received %u octet frag at %u overlaps with frag at %u\n",
+				       count, offset, offsets[f]);
 			continue;
 		}
 
-		{
-			register int i;
-			
-			for (i = numfrags; i > n; i--) {
-				offsets[i] = offsets[i-1];
-				counts[i] = counts[i-1];
-			}
+		for (ff = numfrags; ff > f; ff--) {
+			offsets[ff] = offsets[ff-1];
+			counts[ff] = counts[ff-1];
 		}
-		offsets[n] = offset;
-		counts[n] = count;
+		offsets[f] = offset;
+		counts[f] = count;
 		numfrags++;
 
 		/*
@@ -1171,25 +1162,29 @@ getresponse(
 		if (!CTL_ISMORE(rpkt.r_m_e_op)) {
 			seenlastfrag = 1;
 			if (rstatus != 0)
-			    *rstatus = ntohs(rpkt.status);
+				*rstatus = ntohs(rpkt.status);
 		}
 
 		/*
 		 * Copy the data into the data buffer.
 		 */
-		memmove((char *)pktdata + offset, (char *)rpkt.data, count);
+		memcpy((char *)pktdata + offset, rpkt.data, count);
 
 		/*
 		 * If we've seen the last fragment, look for holes in the sequence.
 		 * If there aren't any, we're done.
 		 */
 		if (seenlastfrag && offsets[0] == 0) {
-			for (n = 1; n < numfrags; n++) {
-				if (offsets[n-1] + counts[n-1] != offsets[n])
+			for (f = 1; f < numfrags; f++)
+				if (offsets[f-1] + counts[f-1] !=
+				    offsets[f])
 					break;
-			}
-			if (n == numfrags) {
-				*rsize = offsets[numfrags-1] + counts[numfrags-1];
+			if (f == numfrags) {
+				*rsize = offsets[f-1] + counts[f-1];
+				if (debug)
+					fprintf(stderr,
+						"%u packets reassembled into response\n",
+						numfrags);
 				return 0;
 			}
 		}
@@ -1310,18 +1305,112 @@ sendrequest(
 
 
 /*
- * doquery - send a request and process the response
+ * show_error_msg - display the error text for a mode 6 error response.
+ */
+void
+show_error_msg(
+	int		m6resp,
+	associd_t	associd
+	)
+{
+	if (numhosts > 1)
+		fprintf(stderr, "server=%s ", currenthost);
+
+	switch(m6resp) {
+
+	case CERR_BADFMT:
+		fprintf(stderr,
+		    "***Server reports a bad format request packet\n");
+		break;
+
+	case CERR_PERMISSION:
+		fprintf(stderr,
+		    "***Server disallowed request (authentication?)\n");
+		break;
+
+	case CERR_BADOP:
+		fprintf(stderr,
+		    "***Server reports a bad opcode in request\n");
+		break;
+
+	case CERR_BADASSOC:
+		fprintf(stderr,
+		    "***Association ID %d unknown to server\n",
+		    associd);
+		break;
+
+	case CERR_UNKNOWNVAR:
+		fprintf(stderr,
+		    "***A request variable unknown to the server\n");
+		break;
+
+	case CERR_BADVALUE:
+		fprintf(stderr,
+		    "***Server indicates a request variable was bad\n");
+		break;
+
+	case ERR_UNSPEC:
+		fprintf(stderr,
+		    "***Server returned an unspecified error\n");
+		break;
+
+	case ERR_TIMEOUT:
+		fprintf(stderr, "***Request timed out\n");
+		break;
+
+	case ERR_INCOMPLETE:
+		fprintf(stderr,
+		    "***Response from server was incomplete\n");
+		break;
+
+	case ERR_TOOMUCH:
+		fprintf(stderr,
+		    "***Buffer size exceeded for returned data\n");
+		break;
+
+	default:
+		fprintf(stderr,
+		    "***Server returns unknown error code %d\n",
+		    m6resp);
+	}
+}
+
+/*
+ * doquery - send a request and process the response, displaying
+ *	     error messages for any error responses.
  */
 int
 doquery(
 	int opcode,
-	int associd,
+	associd_t associd,
 	int auth,
 	int qsize,
 	char *qdata,
 	u_short *rstatus,
 	int *rsize,
-	char **rdata
+	const char **rdata
+	)
+{
+	return doqueryex(opcode, associd, auth, qsize, qdata, rstatus,
+			 rsize, rdata, FALSE);
+}
+
+
+/*
+ * doqueryex - send a request and process the response, optionally
+ *	       displaying error messages for any error responses.
+ */
+int
+doqueryex(
+	int opcode,
+	associd_t associd,
+	int auth,
+	int qsize,
+	char *qdata,
+	u_short *rstatus,
+	int *rsize,
+	const char **rdata,
+	int quiet
 	)
 {
 	int res;
@@ -1331,7 +1420,7 @@ doquery(
 	 * Check to make sure host is open
 	 */
 	if (!havehost) {
-		(void) fprintf(stderr, "***No host open, use `host' command\n");
+		fprintf(stderr, "***No host open, use `host' command\n");
 		return -1;
 	}
 
@@ -1344,7 +1433,7 @@ doquery(
 	 */
 	res = sendrequest(opcode, associd, auth, qsize, qdata);
 	if (res != 0)
-	    return res;
+		return res;
 	
 	/*
 	 * Get the response.  If we got a standard error, print a message
@@ -1363,53 +1452,9 @@ doquery(
 			done = 1;
 			goto again;
 		}
-		if (numhosts > 1)
-			(void) fprintf(stderr, "server=%s ", currenthost);
-		switch(res) {
-		    case CERR_BADFMT:
-			(void) fprintf(stderr,
-			    "***Server reports a bad format request packet\n");
-			break;
-		    case CERR_PERMISSION:
-			(void) fprintf(stderr,
-			    "***Server disallowed request (authentication?)\n");
-			break;
-		    case CERR_BADOP:
-			(void) fprintf(stderr,
-			    "***Server reports a bad opcode in request\n");
-			break;
-		    case CERR_BADASSOC:
-			(void) fprintf(stderr,
-			    "***Association ID %d unknown to server\n",associd);
-			break;
-		    case CERR_UNKNOWNVAR:
-			(void) fprintf(stderr,
-			    "***A request variable unknown to the server\n");
-			break;
-		    case CERR_BADVALUE:
-			(void) fprintf(stderr,
-			    "***Server indicates a request variable was bad\n");
-			break;
-		    case ERR_UNSPEC:
-			(void) fprintf(stderr,
-			    "***Server returned an unspecified error\n");
-			break;
-		    case ERR_TIMEOUT:
-			(void) fprintf(stderr, "***Request timed out\n");
-			break;
-		    case ERR_INCOMPLETE:
-			(void) fprintf(stderr,
-			    "***Response from server was incomplete\n");
-			break;
-		    case ERR_TOOMUCH:
-			(void) fprintf(stderr,
-			    "***Buffer size exceeded for returned data\n");
-			break;
-		    default:
-			(void) fprintf(stderr,
-			    "***Server returns unknown error code %d\n", res);
-			break;
-		}
+		if (!quiet)
+			show_error_msg(res, associd);
+
 	}
 	return res;
 }
@@ -1789,34 +1834,42 @@ getnetnum(
 	int af
 	)
 {
-	int sockaddr_len;
 	struct addrinfo hints, *ai = NULL;
 
-	sockaddr_len = SIZEOF_SOCKADDR(af);
-	memset(&hints, 0, sizeof(hints));
+	ZERO(hints);
 	hints.ai_flags = AI_CANONNAME;
 #ifdef AI_ADDRCONFIG
 	hints.ai_flags |= AI_ADDRCONFIG;
 #endif
 	
-	/* decodenetnum works with addresses only */
+	/*
+	 * decodenetnum only works with addresses, but handles syntax
+	 * that getaddrinfo doesn't:  [2001::1]:1234
+	 */
 	if (decodenetnum(hname, num)) {
-		if (fullhost != 0) {
-			getnameinfo((struct sockaddr *)num, sockaddr_len,
-					fullhost, sizeof(fullhost), NULL, 0,
-					NI_NUMERICHOST);
-		}
+		if (fullhost != NULL)
+			getnameinfo(&num->sa, SOCKLEN(num), fullhost,
+				    LENHOSTNAME, NULL, 0, 0);
 		return 1;
 	} else if (getaddrinfo(hname, "ntp", &hints, &ai) == 0) {
-		memmove((char *)num, ai->ai_addr, ai->ai_addrlen);
-		if (ai->ai_canonname != 0)
-		    (void) strcpy(fullhost, ai->ai_canonname);
+		NTP_INSIST(sizeof(*num) >= ai->ai_addrlen);
+		memcpy(num, ai->ai_addr, ai->ai_addrlen);
+		if (fullhost != NULL) {
+			if (ai->ai_canonname != NULL) {
+				strncpy(fullhost, ai->ai_canonname,
+					LENHOSTNAME);
+				fullhost[LENHOSTNAME - 1] = '\0';
+			} else {
+				getnameinfo(&num->sa, SOCKLEN(num),
+					    fullhost, LENHOSTNAME, NULL,
+					    0, 0);
+			}
+		}
 		return 1;
-	} else {
-		(void) fprintf(stderr, "***Can't find host %s\n", hname);
-		return 0;
 	}
-	/*NOTREACHED*/
+	fprintf(stderr, "***Can't find host %s\n", hname);
+
+	return 0;
 }
 
 /*
@@ -1828,12 +1881,39 @@ nntohost(
 	sockaddr_u *netnum
 	)
 {
-	if (!showhostnames)
-		return stoa(netnum);
-	else if (ISREFCLOCKADR(netnum))
-		return refnumtoa(netnum);
-	else
-		return socktohost(netnum);
+	return nntohost_col(netnum, LIB_BUFLENGTH - 1, FALSE);
+}
+
+
+/*
+ * nntohost_col - convert network number to host name in fixed width.
+ *		  This routine enforces the showhostnames setting.
+ *		  When displaying hostnames longer than the width,
+ *		  the first part of the hostname is displayed.  When
+ *		  displaying numeric addresses longer than the width,
+ *		  Such as IPv6 addresses, the caller decides whether
+ *		  the first or last of the numeric address is used.
+ */
+char *
+nntohost_col(
+	sockaddr_u *	addr,
+	size_t		width,
+	int		preserve_lowaddrbits
+	)
+{
+	const char *	out;
+
+	if (!showhostnames) {
+		if (preserve_lowaddrbits)
+			out = trunc_left(stoa(addr), width);
+		else
+			out = trunc_right(stoa(addr), width);
+	} else if (ISREFCLOCKADR(addr)) {
+		out = refnumtoa(addr);
+	} else {
+		out = trunc_right(socktohost(addr), width);
+	}
+	return out;
 }
 
 
@@ -1973,6 +2053,10 @@ decodets(
 	l_fp *lfp
 	)
 {
+	char *cp;
+	char buf[30];
+	size_t b;
+
 	/*
 	 * If it starts with a 0x, decode as hex.
 	 */
@@ -1983,14 +2067,12 @@ decodets(
 	 * If it starts with a '"', try it as an RT-11 date.
 	 */
 	if (*str == '"') {
-		register char *cp = str+1;
-		register char *bp;
-		char buf[30];
-
-		bp = buf;
-		while (*cp != '"' && *cp != '\0' && bp < &buf[29])
-			*bp++ = *cp++;
-		*bp = '\0';
+		cp = str + 1;
+		b = 0;
+		while ('"' != *cp && '\0' != *cp &&
+		       b < COUNTOF(buf) - 1)
+			buf[b++] = *cp++;
+		buf[b] = '\0';
 		return rtdatetolfp(buf, lfp);
 	}
 
@@ -2115,59 +2197,52 @@ help(
 	struct xcmd *xcp = NULL;	/* quiet warning */
 	char *cmd;
 	const char *list[100];
-	int word, words;
-	int row, rows;
-	int col, cols;
+	size_t word, words;
+	size_t row, rows;
+	size_t col, cols;
+	size_t length;
 
 	if (pcmd->nargs == 0) {
 		words = 0;
-		for (xcp = builtins; xcp->keyword != 0; xcp++) {
+		for (xcp = builtins; xcp->keyword != NULL; xcp++) {
 			if (*(xcp->keyword) != '?')
 				list[words++] = xcp->keyword;
 		}
-		for (xcp = opcmds; xcp->keyword != 0; xcp++)
+		for (xcp = opcmds; xcp->keyword != NULL; xcp++)
 			list[words++] = xcp->keyword;
 
-		qsort(
-#ifdef QSORT_USES_VOID_P
-		    (void *)
-#else
-		    (char *)
-#endif
-			(list), (size_t)(words), sizeof(char *), helpsort);
+		qsort((void *)list, (size_t)words, sizeof(list[0]),
+		      helpsort);
 		col = 0;
 		for (word = 0; word < words; word++) {
-		 	int length = strlen(list[word]);
-			if (col < length) {
-				col = length;
-			}
+		 	length = strlen(list[word]);
+			col = max(col, length);
 		}
 
 		cols = SCREENWIDTH / ++col;
 		rows = (words + cols - 1) / cols;
 
-		(void) fprintf(fp, "ntpq commands:\n");
+		fprintf(fp, "ntpq commands:\n");
 
 		for (row = 0; row < rows; row++) {
-			for (word = row; word < words; word += rows) {
-				(void) fprintf(fp, "%-*.*s", col, 
-						   col-1, list[word]);
-			}
-			(void) fprintf(fp, "\n");
+			for (word = row; word < words; word += rows)
+				fprintf(fp, "%-*.*s", col,  col-1,
+					list[word]);
+			fprintf(fp, "\n");
 		}
 	} else {
 		cmd = pcmd->argval[0].string;
 		words = findcmd(cmd, builtins, opcmds, &xcp);
 		if (words == 0) {
-			(void) fprintf(stderr,
-				       "Command `%s' is unknown\n", cmd);
+			fprintf(stderr,
+				"Command `%s' is unknown\n", cmd);
 			return;
 		} else if (words >= 2) {
-			(void) fprintf(stderr,
-				       "Command `%s' is ambiguous\n", cmd);
+			fprintf(stderr,
+				"Command `%s' is ambiguous\n", cmd);
 			return;
 		}
-		(void) fprintf(fp, "function: %s\n", xcp->comment);
+		fprintf(fp, "function: %s\n", xcp->comment);
 		printusage(xcp, fp);
 	}
 }
@@ -2176,29 +2251,18 @@ help(
 /*
  * helpsort - do hostname qsort comparisons
  */
-#ifdef QSORT_USES_VOID_P
 static int
 helpsort(
 	const void *t1,
 	const void *t2
 	)
 {
-	char const * const * name1 = (char const * const *)t1;
-	char const * const * name2 = (char const * const *)t2;
+	const char * const *	name1 = t1;
+	const char * const *	name2 = t2;
 
 	return strcmp(*name1, *name2);
 }
 
-#else
-static int
-helpsort(
-	char **name1,
-	char **name2
-	)
-{
-	return strcmp(*name1, *name2);
-}
-#endif
 
 /*
  * printusage - print usage information for a command
@@ -2644,10 +2708,11 @@ getkeyid(
 	const char *keyprompt
 	)
 {
-	register char *p;
-	register int c;
+	int c;
 	FILE *fi;
 	char pbuf[20];
+	size_t i;
+	size_t ilim;
 
 #ifndef SYS_WINNT
 	if ((fi = fdopen(open("/dev/tty", 2), "r")) == NULL)
@@ -2655,18 +2720,16 @@ getkeyid(
 	if ((fi = _fdopen(open("CONIN$", _O_TEXT), "r")) == NULL)
 #endif /* SYS_WINNT */
 		fi = stdin;
-	    else
+	else
 		setbuf(fi, (char *)NULL);
 	fprintf(stderr, "%s", keyprompt); fflush(stderr);
-	for (p=pbuf; (c = getc(fi))!='\n' && c!=EOF;) {
-		if (p < &pbuf[18])
-		    *p++ = (char)c;
-	}
-	*p = '\0';
+	for (i = 0, ilim = COUNTOF(pbuf) - 1;
+	     i < ilim && (c = getc(fi)) != '\n' && c != EOF;
+	     )
+		pbuf[i++] = (char)c;
+	pbuf[i] = '\0';
 	if (fi != stdin)
-	    fclose(fi);
-	if (strcmp(pbuf, "0") == 0)
-	    return 0;
+		fclose(fi);
 
 	return (u_long) atoi(pbuf);
 }
@@ -2785,6 +2848,62 @@ asciize(
 
 
 /*
+ * truncate string to fit clipping excess at end.
+ *	"too long"	->	"too l"
+ * Used for hostnames.
+ */
+char *
+trunc_right(
+	const char *	src,
+	size_t		width
+	)
+{
+	size_t	sl;
+	char *	out;
+
+	
+	sl = strlen(src);
+	if (sl > width && LIB_BUFLENGTH - 1 > width && width > 0) {
+		LIB_GETBUF(out);
+		memcpy(out, src, width);
+		out[width] = '\0';
+
+		return out;
+	}
+
+	return src;
+}
+
+
+/*
+ * truncate string to fit by preserving right side and using '_' to hint
+ *	"too long"	->	"_long"
+ * Used for local IPv6 addresses, where low bits differentiate.
+ */
+char *
+trunc_left(
+	const char *	src,
+	size_t		width
+	)
+{
+	size_t	sl;
+	char *	out;
+
+
+	sl = strlen(src);
+	if (sl > width && LIB_BUFLENGTH - 1 > width && width > 1) {
+		LIB_GETBUF(out);
+		out[0] = '_';
+		memcpy(&out[1], &src[sl + 1 - width], width);
+
+		return out;
+	}
+
+	return src;
+}
+
+
+/*
  * Some circular buffer space
  */
 #define	CBLEN	80
@@ -2799,15 +2918,15 @@ int nextcb = 0;
 int
 nextvar(
 	int *datalen,
-	char **datap,
+	const char **datap,
 	char **vname,
 	char **vvalue
 	)
 {
-	register char *cp;
-	register char *np;
-	register char *cpend;
-	register char *npend;	/* character after last */
+	const char *cp;
+	char *np;
+	const char *cpend;
+	char *npend;	/* character after last */
 	int quoted = 0;
 	static char name[MAXVARLEN];
 	static char value[MAXVALLEN];
@@ -2819,9 +2938,9 @@ nextvar(
 	 * Space past commas and white space
 	 */
 	while (cp < cpend && (*cp == ',' || isspace((int)*cp)))
-	    cp++;
+		cp++;
 	if (cp == cpend)
-	    return 0;
+		return 0;
 	
 	/*
 	 * Copy name until we hit a ',', an '=', a '\r' or a '\n'.  Backspace
@@ -2930,7 +3049,7 @@ findvar(
 void
 printvars(
 	int length,
-	char *data,
+	const char *data,
 	int status,
 	int sttype,
 	int quiet,
@@ -2951,14 +3070,14 @@ static void
 rawprint(
 	int datatype,
 	int length,
-	char *data,
+	const char *data,
 	int status,
 	int quiet,
 	FILE *fp
 	)
 {
-	register char *cp;
-	register char *cpend;
+	const char *cp;
+	const char *cpend;
 
 	/*
 	 * Essentially print the data as is.  We reformat unprintables, though.
@@ -3150,7 +3269,7 @@ static void
 cookedprint(
 	int datatype,
 	int length,
-	char *data,
+	const char *data,
 	int status,
 	int quiet,
 	FILE *fp
@@ -3350,29 +3469,22 @@ void
 sortassoc(void)
 {
 	if (numassoc > 1)
-	    qsort(
-#ifdef QSORT_USES_VOID_P
-		    (void *)
-#else
-		    (char *)
-#endif
-		    assoc_cache, (size_t)numassoc,
-		    sizeof(struct association), assoccmp);
+		qsort((void *)assoc_cache, (size_t)numassoc,
+		    sizeof(assoc_cache[0]), assoccmp);
 }
 
 
 /*
  * assoccmp - compare two associations
  */
-#ifdef QSORT_USES_VOID_P
 static int
 assoccmp(
 	const void *t1,
 	const void *t2
 	)
 {
-	const struct association *ass1 = (const struct association *)t1;
-	const struct association *ass2 = (const struct association *)t2;
+	const struct association *ass1 = t1;
+	const struct association *ass2 = t2;
 
 	if (ass1->assid < ass2->assid)
 		return -1;
@@ -3380,20 +3492,7 @@ assoccmp(
 		return 1;
 	return 0;
 }
-#else
-static int
-assoccmp(
-	struct association *ass1,
-	struct association *ass2
-	)
-{
-	if (ass1->assid < ass2->assid)
-	    return -1;
-	if (ass1->assid > ass2->assid)
-	    return 1;
-	return 0;
-}
-#endif /* not QSORT_USES_VOID_P */
+
 
 /*
  * ntpq_custom_opt_handler - autoopts handler for -c and -p

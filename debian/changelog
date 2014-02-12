@@ -1,3 +1,72 @@
+ntp (1:4.2.6.p5+dfsg-2) unstable; urgency=medium
+
+  * Re-enable crypto support by pointing openssl libdir to multiarch dir.
+    Also increase libssl-dev build dependency to the first multiarch
+    version. (closes: #670662)
+
+ -- Peter Eisentraut <petere@debian.org>  Sat, 12 May 2012 12:04:06 +0300
+
+ntp (1:4.2.6.p5+dfsg-1) unstable; urgency=low
+
+  * New upstream release (closes: #644673)
+  * Updated instructions on generating autotools.patch
+  * Updated standards version
+
+ -- Peter Eisentraut <petere@debian.org>  Mon, 27 Feb 2012 13:55:56 +0200
+
+ntp (1:4.2.6.p3+dfsg-3) unstable; urgency=medium
+
+  * Update format-security.patch to include kfreebsd-specific fixes
+    (closes: #653771)
+
+ -- Peter Eisentraut <petere@debian.org>  Thu, 05 Jan 2012 19:37:28 +0200
+
+ntp (1:4.2.6.p3+dfsg-2) unstable; urgency=low
+
+  * Use architecture wildcard for libcap2-dev build dependency, removing
+    type-handing dependency (closes: #528440, #587871)
+  * Updated standards version
+  * Get build flags from dpkg-buildflags, and fix the resulting
+    -Wformat-security errors using patch from Colin Watson (closes:
+    #542721, #627403)
+  * Add -Wl,--as-needed to LDFLAGS, which drops the dependency of ntpdate
+    on libcap2
+  * Add sntp-manpage.patch to fix some errors in sntp man page pointed out
+    by lintian
+  * Re-remove tickadj.  The previous method of achieving this by tweaking
+    configure cache variables apparently broke at some point, so this time
+    do it more directly.
+  * Explicitly disable building ntpsnmpd and remove man page (closes:
+    #608542; see also #622819)
+  * ntpdate-debian: Improve parsing of ntp.conf (closes: #606349)
+  * Add descriptions of -4/-6 options to ntpd man page (closes: #613349)
+  * Update options list on ntptrace man page to match reality (closes:
+    #593417)
+  * Add build-arch and build-indep debian/rules targets, per lintian
+  * Create ntp user and group separately, to handle the case where the
+    user already exists but not the group (closes: #624275)
+  * Don't ignore errors from adduser.  If the system user or group already
+    exist, this is ignored anyway.  Anything else we want to know about.
+  * Generalize ntp.cron.daily to cover all possible filegen stats files
+    (closes: #644120)
+
+ -- Peter Eisentraut <petere@debian.org>  Sat, 17 Dec 2011 19:00:10 +0200
+
+ntp (1:4.2.6.p3+dfsg-1) unstable; urgency=low
+
+  * New upstream version
+    - Require newer autogen version
+  * Include sntp in source, it got rewritting and licensed changed.
+  * Re-add neoclock4x driver, license got changed.
+  * Drop nanokernel-status.patch.  2.6.26 was part of lenny, so everybody
+    really should have nanokernel support now.  The patch also didn't
+    actually enable the nano kernel.
+  * Drop mod_nano.patch, libc now provides the proper defines.
+  * We now build against a libc that has NTP_API 4 support, which means
+    that we get TAI offset support.
+
+ -- Kurt Roeckx <kurt@roeckx.be>  Fri, 03 Jun 2011 16:39:02 +0200
+
 ntp (1:4.2.6.p2+dfsg-1) unstable; urgency=low
 
   [ Peter Eisentraut ]

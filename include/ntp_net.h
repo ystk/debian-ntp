@@ -9,8 +9,17 @@
 #ifdef HAVE_SYS_SOCKET_H
 #include <sys/socket.h>
 #endif
+#ifdef HAVE_NET_IF_H
+#include <net/if.h>
+#endif
 #ifdef HAVE_NETINET_IN_H
 #include <netinet/in.h>
+#endif
+#ifdef HAVE_NET_IF_VAR_H
+#include <net/if_var.h>
+#endif
+#ifdef HAVE_NETINET_IN_VAR_H
+#include <netinet/in_var.h>
 #endif
 
 #include "ntp_rfc2553.h"
@@ -93,6 +102,10 @@ typedef union {
 	(IS_IPV4(psau)						\
 	    ? IN_CLASSD(SRCADR(psau))				\
 	    : IN6_IS_ADDR_MULTICAST(PSOCK_ADDR6(psau)))
+
+/* v6 is interface ID scope universal, as with MAC-derived addresses */
+#define IS_IID_UNIV(psau)					\
+	(!!(0x02 & NSRCADR6(psau)[8]))
 
 #define SIZEOF_INADDR(fam)					\
 	((AF_INET == (fam))					\

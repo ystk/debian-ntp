@@ -9,8 +9,8 @@ endif
 
 EXTRA_PROGRAMS=	ntpsnmpd
 ntpsnmpd_SOURCES= netsnmp_daemonize.c ntpsnmpd.c ntpSnmpSubagentObject.c \
-			ntpsnmpd-opts.c ntpsnmpd-opts.h
-noinst_HEADERS=	ntpSnmpSubagentObject.h
+		ntpsnmpd-opts.c ntpsnmpd-opts.h ntpSnmpSubagentObject.h \
+		ntp_snmp.h
 # HMS: we probably want a version.o file here, too.
 LDADD=		../ntpq/libntpq.a ../libntp/libntp.a @LCRYPTO@ @SNMP_LIBS@ \
 		$(LIBOPTS_LDADD)
@@ -48,6 +48,7 @@ $(srcdir)/ntpsnmpd-opts.menu: $(srcdir)/ntpsnmpd-opts.texi
 	
 $(srcdir)/ntpsnmpd-opts.texi: $(srcdir)/ntpsnmpd-opts.def $(std_def_list)
 	$(run_ag) -Taginfo.tpl -DLEVEL=section ntpsnmpd-opts.def
+	$(top_srcdir)/scripts/check--help $@
 
 include $(top_srcdir)/bincheck.mf
 include $(top_srcdir)/depsver.mf
