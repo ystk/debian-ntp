@@ -19,6 +19,8 @@ noinst_SCRIPTS =		\
 	$(NULL)
 
 EXTRA_DIST =			\
+	check--help		\
+	checkChangeLog		\
 	cvo.sh			\
 	fixautomakedepsmagic	\
 	genCommitLog		\

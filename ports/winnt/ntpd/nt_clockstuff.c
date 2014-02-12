@@ -188,6 +188,13 @@ static int	is_qpc_built_on_pcc(void);
 static DOUBLE ppm_per_adjust_unit = 0.0;
 
 /*
+ * wintickadj emulates the functionality provided by unix tickadj,
+ * providing a baseline clock correction if needed to get the
+ * clock within a few hundred PPM of correct frequency.
+ */
+static long wintickadj;
+
+/*
  * performance counter frequency observations
  */
 #define TUNE_CTR_DEPTH		3	/* running avg depth */
@@ -557,6 +564,7 @@ adj_systime(
 
 
 	/* only adjust the clock if adjustment changes */
+	TimeAdjustment += wintickadj;
 	if (last_Adj != TimeAdjustment) {
 		last_Adj = TimeAdjustment;
 		DPRINTF(1, ("SetSystemTimeAdjustment(%+ld)\n", TimeAdjustment));
@@ -592,6 +600,9 @@ init_winnt_time(void)
 	LARGE_INTEGER Freq;
 	FT_ULL initial_hectonanosecs;
 	FT_ULL next_hectonanosecs;
+	double adjppm;
+	double rawadj;
+	char * pch;
 
 	if (winnt_time_initialized)
 		return;
@@ -775,11 +786,25 @@ init_winnt_time(void)
 		(LONGLONG)os_clock_precision / 1e4, 
 		ppm_per_adjust_unit);
 
+	pch = getenv("NTPD_TICKADJ_PPM");
+	if (pch != NULL && 1 == sscanf(pch, "%lf", &adjppm)) {
+		rawadj = adjppm / ppm_per_adjust_unit;
+		rawadj += (rawadj < 0)
+			      ? -0.5
+			      : 0.5;
+		wintickadj = (long)rawadj;
+		msyslog(LOG_INFO,
+			"Using NTPD_TICKADJ_PPM %+g ppm (%+ld)",
+			adjppm, wintickadj);
+	}
+
 	winnt_time_initialized = TRUE;
 
 	choose_interp_counter();
 
-	if (os_clock_precision < 4 * 10000 && !getenv("NTPD_USE_INTERP_DANGEROUS")) {
+	if (getenv("NTPD_USE_SYSTEM_CLOCK") ||
+	    (os_clock_precision < 4 * 10000 &&
+	     !getenv("NTPD_USE_INTERP_DANGEROUS"))) {
 		msyslog(LOG_INFO, "using Windows clock directly");
 	} else {
 		winnt_use_interpolation = TRUE;
@@ -1228,9 +1253,11 @@ ntp_timestamp_from_counter(
 		Now.ll -= InterpTimestamp;
 		if (Now.ll > 60 * HECTONANOSECONDS || 
 		    Now.ll < -60 * (LONGLONG) HECTONANOSECONDS) {
-			DPRINTF(1, ("ntp_timestamp_from_counter serial driver system "
-				    "time %.6fs from current\n",
+			DPRINTF(1, ("ntp_timestamp_from_counter serial driver system time %.6fs from current\n",
 				    Now.ll / (double)LL_HNS));
+			msyslog(LOG_ERR,
+				"ntp_timestamp_from_counter serial driver system time %.6fs from current\n",
+				Now.ll / (double)LL_HNS);
 			exit(-1);
 		}
 #endif

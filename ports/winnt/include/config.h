@@ -35,6 +35,8 @@
 #include <malloc.h>
 #include <crtdbg.h>
 /* #define MALLOC_LINT */	/* defers free() */
+# define EREALLOC_IMPL(ptr, newsz, filenm, loc) \
+	 _realloc_dbg(ptr, newsz, _NORMAL_BLOCK, filenm, loc)
 #endif
 
 /*
@@ -272,6 +274,7 @@ typedef int socklen_t;
 #define isatty		_isatty
 #define mktemp		_mktemp
 #define getpid		_getpid
+#define timegm		_mkgmtime
 
 typedef int pid_t;		/* PID is an int */
 typedef int ssize_t;		/* ssize is an int */
@@ -303,6 +306,7 @@ typedef __int32 int32_t;	/* define a typedef for int32_t */
 # define REFCLOCK			/* from ntpd.mak */
 
 /* # define CLOCK_PARSE  */
+# define CLOCK_ARBITER
 # define CLOCK_ARCRON_MSF
 # define OWN_PPS_NTP_TIMESTAMP_FROM_COUNTER	/* timepps.h */
 # define HAVE_TIMEPPS_H
@@ -321,6 +325,7 @@ typedef __int32 int32_t;	/* define a typedef for int32_t */
 # define CLOCK_SPECTRACOM	/* refclock_wwvb.c */
 # define CLOCK_TRIMBLEDC
 # define CLOCK_TRIMTSIP 1
+# define CLOCK_TRUETIME
 
 # define NTP_LITTLE_ENDIAN		/* from libntp.mak */
 # define NTP_POSIX_SOURCE
@@ -343,6 +348,7 @@ typedef __int32 int32_t;	/* define a typedef for int32_t */
 # define HAVE_STDARG_H
 # define HAVE_NO_NICE
 # define HAVE_MKTIME
+# define HAVE_TIMEGM		1	/* actually _mkgmtime */
 # define HAVE_STRUCT_TIMESPEC
 # define TIME_WITH_SYS_TIME
 # define HAVE_IO_COMPLETION_PORT
@@ -392,6 +398,7 @@ typedef unsigned long uintptr_t;
 /* Directory separator, usually / or \ */
 #define	DIR_SEP	'\\'
 
+#define	POSIX_SHELL	"/bin/sh"	/* libopts/makeshell.c */
 
 #define ULONG_CONST(a) a ## UL
 

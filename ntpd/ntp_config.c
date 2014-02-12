@@ -76,33 +76,41 @@ int resolver_pipe_fd[2];  /* used to let the resolver process alert the parent p
  * "logconfig" building blocks
  */
 struct masks {
-	const char	  *name;
-	unsigned long mask;
+	const char * const	name;
+	const u_int32		mask;
 };
 
 static struct masks logcfg_class[] = {
-	{ "clock",		NLOG_OCLOCK },
-	{ "peer",		NLOG_OPEER },
-	{ "sync",		NLOG_OSYNC },
-	{ "sys",		NLOG_OSYS },
-	{ (char *)0,	0 }
+	{ "clock",	NLOG_OCLOCK },
+	{ "peer",	NLOG_OPEER },
+	{ "sync",	NLOG_OSYNC },
+	{ "sys",	NLOG_OSYS },
+	{ NULL,		0 }
 };
 
-static struct masks logcfg_item[] = {
+/* logcfg_noclass_items[] masks are complete and must not be shifted */
+static struct masks logcfg_noclass_items[] = {
+	{ "allall",		NLOG_SYSMASK | NLOG_PEERMASK | NLOG_CLOCKMASK | NLOG_SYNCMASK },
+	{ "allinfo",		NLOG_SYSINFO | NLOG_PEERINFO | NLOG_CLOCKINFO | NLOG_SYNCINFO },
+	{ "allevents",		NLOG_SYSEVENT | NLOG_PEEREVENT | NLOG_CLOCKEVENT | NLOG_SYNCEVENT },
+	{ "allstatus",		NLOG_SYSSTATUS | NLOG_PEERSTATUS | NLOG_CLOCKSTATUS | NLOG_SYNCSTATUS },
+	{ "allstatistics",	NLOG_SYSSTATIST | NLOG_PEERSTATIST | NLOG_CLOCKSTATIST | NLOG_SYNCSTATIST },
+	/* the remainder are misspellings of clockall, peerall, sysall, and syncall. */
+	{ "allclock",		(NLOG_INFO | NLOG_STATIST | NLOG_EVENT | NLOG_STATUS) << NLOG_OCLOCK },
+	{ "allpeer",		(NLOG_INFO | NLOG_STATIST | NLOG_EVENT | NLOG_STATUS) << NLOG_OPEER },
+	{ "allsys",		(NLOG_INFO | NLOG_STATIST | NLOG_EVENT | NLOG_STATUS) << NLOG_OSYS },
+	{ "allsync",		(NLOG_INFO | NLOG_STATIST | NLOG_EVENT | NLOG_STATUS) << NLOG_OSYNC },
+	{ NULL,			0 }
+};
+
+/* logcfg_class_items[] masks are shiftable by NLOG_O* counts */
+static struct masks logcfg_class_items[] = {
+	{ "all",		NLOG_INFO | NLOG_EVENT | NLOG_STATUS | NLOG_STATIST },
 	{ "info",		NLOG_INFO },
-	{ "allinfo",		NLOG_SYSINFO|NLOG_PEERINFO|NLOG_CLOCKINFO|NLOG_SYNCINFO },
 	{ "events",		NLOG_EVENT },
-	{ "allevents",		NLOG_SYSEVENT|NLOG_PEEREVENT|NLOG_CLOCKEVENT|NLOG_SYNCEVENT },
 	{ "status",		NLOG_STATUS },
-	{ "allstatus",		NLOG_SYSSTATUS|NLOG_PEERSTATUS|NLOG_CLOCKSTATUS|NLOG_SYNCSTATUS },
 	{ "statistics",		NLOG_STATIST },
-	{ "allstatistics",	NLOG_SYSSTATIST|NLOG_PEERSTATIST|NLOG_CLOCKSTATIST|NLOG_SYNCSTATIST },
-	{ "allclock",		(NLOG_INFO|NLOG_STATIST|NLOG_EVENT|NLOG_STATUS)<<NLOG_OCLOCK },
-	{ "allpeer",		(NLOG_INFO|NLOG_STATIST|NLOG_EVENT|NLOG_STATUS)<<NLOG_OPEER },
-	{ "allsys",		(NLOG_INFO|NLOG_STATIST|NLOG_EVENT|NLOG_STATUS)<<NLOG_OSYS },
-	{ "allsync",		(NLOG_INFO|NLOG_STATIST|NLOG_EVENT|NLOG_STATUS)<<NLOG_OSYNC },
-	{ "all",		NLOG_SYSMASK|NLOG_PEERMASK|NLOG_CLOCKMASK|NLOG_SYNCMASK },
-	{ (char *)0,	0 }
+	{ NULL,			0 }
 };
 
 /* Limits */
@@ -303,9 +311,9 @@ do {					\
 } while (0)
 
 void ntpd_set_tod_using(const char *);
-static unsigned long get_pfxmatch(char **s,struct masks *m);
-static unsigned long get_match(char *s,struct masks *m);
-static unsigned long get_logmask(char *s);
+static u_int32 get_pfxmatch(const char **, struct masks *);
+static u_int32 get_match(const char *, struct masks *);
+static u_int32 get_logmask(const char *);
 static int getnetnum(const char *num,sockaddr_u *addr, int complain,
 		     enum gnn_type a_type);
 static int get_multiple_netnums(const char *num, sockaddr_u *addr,
@@ -1681,7 +1689,7 @@ config_other_modes(
 	addr_node = queue_head(ptree->manycastserver);
 	if (addr_node != NULL) {
 		do {
-			memset((char *)&addr_sock, 0, sizeof(addr_sock));
+			ZERO_SOCK(&addr_sock);
 			AF(&addr_sock) = (u_short)addr_node->type;
 
 			if (getnetnum(addr_node->address, &addr_sock, 1, t_UNK)  == 1)
@@ -1696,12 +1704,11 @@ config_other_modes(
 	addr_node = queue_head(ptree->multicastclient);
 	if (addr_node != NULL) {
 		do {
-			memset((char *)&addr_sock, 0, sizeof(addr_sock));
+			ZERO_SOCK(&addr_sock);
 			AF(&addr_sock) = (u_short)addr_node->type;
 
 			if (getnetnum(addr_node->address, &addr_sock, 1, t_UNK)  == 1)
 				proto_config(PROTO_MULTICAST_ADD, 0, 0., &addr_sock);
-
 
 			addr_node = next_node(addr_node);
 		} while (addr_node != NULL);
@@ -2030,6 +2037,9 @@ config_monitor(
 		filegen_flag = filegen->flag;
 		filegen_type = filegen->type;
 
+		/* "filegen ... enabled" is the default (when filegen is used) */
+		filegen_flag |= FGEN_FLAG_ENABLED;
+
 		my_opts = queue_head(my_node->options);
 		while (my_opts != NULL) {
 
@@ -2108,10 +2118,10 @@ config_monitor(
 					my_opts->attr);
 				exit(1);
 			}
-			filegen_config(filegen, filegen_file, 
-				       filegen_type, filegen_flag);
 			my_opts = next_node(my_opts);
 		}
+		filegen_config(filegen, filegen_file, filegen_type,
+			       filegen_flag);
 		my_node = next_node(my_node);
 	}
 }
@@ -2157,8 +2167,8 @@ config_access(
 	int *			curr_flag;
 	sockaddr_u		addr_sock;
 	sockaddr_u		addr_mask;
-	int			flags;
-	int			mflags;
+	u_short			flags;
+	u_short			mflags;
 	int			restrict_default;
 	const char *		signd_warning =
 #ifdef HAVE_NTP_SIGND
@@ -2427,12 +2437,13 @@ config_nic_rules(
 	)
 {
 	nic_rule_node *	curr_node;
-	isc_netaddr_t	netaddr;
+	sockaddr_u	addr;
 	nic_rule_match	match_type;
 	nic_rule_action	action;
 	char *		if_name;
 	char *		pchSlash;
 	int		prefixlen;
+	int		addrbits;
 
 	curr_node = queue_head(ptree->nic_rules);
 
@@ -2479,16 +2490,16 @@ config_nic_rules(
 			pchSlash = strchr(if_name, '/');
 			if (pchSlash != NULL)
 				*pchSlash = '\0';
-			if (is_ip_address(if_name, &netaddr)) {
+			if (is_ip_address(if_name, &addr)) {
 				match_type = MATCH_IFADDR;
 				if (pchSlash != NULL) {
 					sscanf(pchSlash + 1, "%d",
 					    &prefixlen);
+					addrbits = 8 *
+					    SIZEOF_INADDR(AF(&addr));
 					prefixlen = max(-1, prefixlen);
-					prefixlen = min(prefixlen, 
-					    (AF_INET6 == netaddr.family)
-						? 128
-						: 32);
+					prefixlen = min(prefixlen,
+							addrbits);
 				}
 			} else {
 				match_type = MATCH_IFNAME;
@@ -2720,17 +2731,16 @@ config_phone(
 
 	s = queue_head(ptree->phone);
 	while (s != NULL) {
-		if (i < COUNTOF(sys_phone) - 1)
+		if (i < COUNTOF(sys_phone) - 1) {
 			sys_phone[i++] = estrdup(*s);
-		else
+			sys_phone[i] = NULL;
+		} else {
 			msyslog(LOG_INFO,
 				"phone: Number of phone entries exceeds %lu. Ignoring phone %s...",
 				(u_long)(COUNTOF(sys_phone) - 1), *s);
+		}
 		s = next_node(s);
 	}
-
-	if (i)
-		sys_phone[i] = NULL;
 }
 
 
@@ -3579,7 +3589,7 @@ config_unpeers(
 				DPRINTF(1, ("searching for %s\n", stoa(&peeraddr)));
 
 				while (!found) {
-					peer = findexistingpeer(&peeraddr, peer, -1);
+					peer = findexistingpeer(&peeraddr, peer, -1, 0);
 					if (!peer)
 						break;
 					if (peer->flags & FLAG_CONFIG)
@@ -4023,15 +4033,15 @@ ntpd_set_tod_using(
  * get_pfxmatch - find value for prefixmatch
  * and update char * accordingly
  */
-static unsigned long
+static u_int32
 get_pfxmatch(
-	char ** s,
-	struct masks *m
+	const char **	pstr,
+	struct masks *	m
 	)
 {
-	while (m->name) {
-		if (strncmp(*s, m->name, strlen(m->name)) == 0) {
-			*s += strlen(m->name);
+	while (m->name != NULL) {
+		if (strncmp(*pstr, m->name, strlen(m->name)) == 0) {
+			*pstr += strlen(m->name);
 			return m->mask;
 		} else {
 			m++;
@@ -4043,14 +4053,14 @@ get_pfxmatch(
 /*
  * get_match - find logmask value
  */
-static unsigned long
+static u_int32
 get_match(
-	char *s,
-	struct masks *m
+	const char *	str,
+	struct masks *	m
 	)
 {
-	while (m->name) {
-		if (strcmp(s, m->name) == 0)
+	while (m->name != NULL) {
+		if (strcmp(str, m->name) == 0)
 			return m->mask;
 		else
 			m++;
@@ -4061,23 +4071,28 @@ get_match(
 /*
  * get_logmask - build bitmask for ntp_syslogmask
  */
-static unsigned long
+static u_int32
 get_logmask(
-	char *s
+	const char *	str
 	)
 {
-	char *t;
-	unsigned long offset;
-	unsigned long mask;
+	const char *	t;
+	u_int32		offset;
+	u_int32		mask;
 
-	t = s;
+	mask = get_match(str, logcfg_noclass_items);
+	if (mask != 0)
+		return mask;
+
+	t = str;
 	offset = get_pfxmatch(&t, logcfg_class);
-	mask   = get_match(t, logcfg_item);
+	mask   = get_match(t, logcfg_class_items);
 
 	if (mask)
 		return mask << offset;
 	else
-		msyslog(LOG_ERR, "logconfig: illegal argument %s - ignored", s);
+		msyslog(LOG_ERR, "logconfig: '%s' not recognized - ignored",
+			str);
 
 	return 0;
 }
@@ -4314,7 +4329,7 @@ get_multiple_netnums(
 	struct addrinfo hints;
 	struct addrinfo *ptr;
 	int retval;
-	isc_netaddr_t ipaddr;
+	sockaddr_u ipaddr;
 
 	memset(&hints, 0, sizeof(hints));
 
@@ -4326,7 +4341,7 @@ get_multiple_netnums(
 	lookup = nameornum;
 	if (is_ip_address(nameornum, &ipaddr)) {
 		hints.ai_flags = AI_NUMERICHOST;
-		hints.ai_family = ipaddr.family;
+		hints.ai_family = AF(&ipaddr);
 		if ('[' == nameornum[0]) {
 			lookup = lookbuf;
 			strncpy(lookbuf, &nameornum[1],
@@ -4384,8 +4399,9 @@ get_multiple_netnums(
 		if (!retval) {
 			freeaddrinfo(ptr);
 			return -1;
-		} else 
+		} else {
 			return 0;
+		}
 	}
 	*res = ptr;
 

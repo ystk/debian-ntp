@@ -22,6 +22,7 @@
 # include "ntpsim.h"
 #endif
 
+#include "ntp_libopts.h"
 #include "ntpd-opts.h"
 
 #ifdef HAVE_UNISTD_H
@@ -324,7 +325,7 @@ process_commandline_opts(
 {
 	int optct;
 	
-	optct = optionProcess(&ntpdOptions, *pargc, *pargv);
+	optct = ntpOptionProcess(&ntpdOptions, *pargc, *pargv);
 	*pargc -= optct;
 	*pargv += optct;
 }
@@ -556,13 +557,13 @@ ntpdmain(
 	 * --interface, listen on specified interfaces
 	 */
 	if (HAVE_OPT( INTERFACE )) {
-		int	ifacect = STACKCT_OPT( INTERFACE );
+		int		ifacect = STACKCT_OPT( INTERFACE );
 		const char**	ifaces  = STACKLST_OPT( INTERFACE );
-		isc_netaddr_t	netaddr;
+		sockaddr_u	addr;
 
 		while (ifacect-- > 0) {
 			add_nic_rule(
-				is_ip_address(*ifaces, &netaddr)
+				is_ip_address(*ifaces, &addr)
 					? MATCH_IFADDR
 					: MATCH_IFNAME,
 				*ifaces, -1, ACTION_LISTEN);
@@ -1173,7 +1174,7 @@ getgroup:
 #ifdef HAVE_DNSREGISTRATION
 		if (mdnsreg && (current_time - mdnsreg ) > 60 && mdnstries && sys_leap != LEAP_NOTINSYNC) {
 			mdnsreg = current_time;
-			msyslog(LOG_INFO, "Attemping to register mDNS");
+			msyslog(LOG_INFO, "Attempting to register mDNS");
 			if ( DNSServiceRegister (&mdns, 0, 0, NULL, "_ntp._udp", NULL, NULL, 
 			    htons(NTP_PORT), 0, NULL, NULL, NULL) != kDNSServiceErr_NoError ) {
 				if (!--mdnstries) {
