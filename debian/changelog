@@ -1,3 +1,14 @@
+ntp (1:4.2.6.p2+dfsg-1+deb6u1) squeeze-lts; urgency=low
+
+  * Non-maintainer upload by the Squeeze LTS Team.
+  * Apply patches from the Red Hat security update by Florian Weimer:
+    + ntp-4.2.6p5-cve-2014-9293.patch
+    + ntp-4.2.6p5-cve-2014-9294.patch
+    + ntp-4.2.6p5-cve-2014-9295.patch
+    + ntp-4.2.6p5-cve-2014-9296.patch
+
+ -- Holger Levsen <holger@debian.org>  Sat, 20 Dec 2014 20:46:17 +0000
+
 ntp (1:4.2.6.p2+dfsg-1) unstable; urgency=low
 
   [ Peter Eisentraut ]
