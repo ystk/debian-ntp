@@ -1,3 +1,10 @@
+ntp (1:4.2.6.p2+dfsg-1+deb6u2) squeeze-lts; urgency=medium
+
+  * Fix CVE-2014-9297
+  * Fix CVE-2014-9298
+
+ -- Kurt Roeckx <kurt@roeckx.be>  Sat, 07 Feb 2015 13:15:27 +0100
+
 ntp (1:4.2.6.p2+dfsg-1+deb6u1) squeeze-lts; urgency=low
 
   * Non-maintainer upload by the Squeeze LTS Team.
