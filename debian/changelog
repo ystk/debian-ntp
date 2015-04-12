@@ -1,3 +1,11 @@
+ntp (1:4.2.6.p2+dfsg-1+deb6u3) squeeze-lts; urgency=medium
+
+  * Fix CVE-2015-1798 and CVE-2015-1799 (Closes: #782095)
+  * Fix endless loop and non-random key generation using
+    ntp-keygen on big endian machines.
+
+ -- Kurt Roeckx <kurt@roeckx.be>  Fri, 10 Apr 2015 23:22:29 +0200
+
 ntp (1:4.2.6.p2+dfsg-1+deb6u2) squeeze-lts; urgency=medium
 
   * Fix CVE-2014-9297
