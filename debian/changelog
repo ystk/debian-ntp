@@ -1,3 +1,9 @@
+ntp (1:4.2.6.p2+dfsg-1+deb6u3skerlet1) squeeze-lts; urgency=medium
+
+  * Fix leap second insertion by ntpd (Closes: #794054)
+
+ -- Kazuhiro Hayashi <kazuhiro3.hayashi@toshiba.co.jp>  Mon, 17 Aug 2015 18:40:28 +0900
+
 ntp (1:4.2.6.p2+dfsg-1+deb6u3) squeeze-lts; urgency=medium
 
   * Fix CVE-2015-1798 and CVE-2015-1799 (Closes: #782095)
