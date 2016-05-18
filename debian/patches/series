@@ -32,4 +32,4 @@ ntp-4.2.6p2-cve-2015-7703.patch
 ntp-4.2.6p5-cve-2015-5219.patch
 ntp-4.2.6p5-cve-2015-5300.patch
 ntp-4.2.6p5-cve-2015-7691_7962_7702.patch
-
+xleap.patch

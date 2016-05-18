@@ -1,3 +1,10 @@
+ntp (1:4.2.6.p2+dfsg-1+deb6u4skerlet1) squeeze-lts; urgency=medium
+
+  [ Skerlet ]
+  * Same as 1:4.2.6.p2+dfsg-1+deb6u3skerlet1
+
+ -- Skerlet Project Team <skerlet@swc.toshiba.co.jp>  Wed, 18 May 2016 15:26:13 +0900
+
 ntp (1:4.2.6.p2+dfsg-1+deb6u4) squeeze-lts; urgency=medium
 
   * Fix CVE-2015-7850
@@ -20,6 +27,12 @@ ntp (1:4.2.6.p2+dfsg-1+deb6u4) squeeze-lts; urgency=medium
   * Add build-depends on bison since one of the patches update the .y file.
 
  -- Kurt Roeckx <kurt@roeckx.be>  Wed, 28 Oct 2015 18:47:54 +0100
+
+ntp (1:4.2.6.p2+dfsg-1+deb6u3skerlet1) squeeze-lts; urgency=medium
+
+  * Fix leap second insertion by ntpd (Closes: #794054)
+
+ -- Kazuhiro Hayashi <kazuhiro3.hayashi@toshiba.co.jp>  Mon, 17 Aug 2015 18:40:28 +0900
 
 ntp (1:4.2.6.p2+dfsg-1+deb6u3) squeeze-lts; urgency=medium
 
