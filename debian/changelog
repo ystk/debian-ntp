@@ -1,3 +1,19 @@
+ntp (1:4.2.6.p5+dfsg-7+deb8u2) jessie-security; urgency=medium
+
+  * Rename and update some patches to be closer to what's in Fedora,
+    only some white space changes.
+  * Fix CVE-2015-7974
+  * Fix CVE-2015-7977, CVE-2015-7978
+  * Fix CVE-2015-7979
+  * Fix CVE-2015-8138
+  * Fix CVE-2015-8158
+  * Fix CVE-2016-1548
+  * Fix CVE-2016-1550
+  * Fix CVE-2016-2516
+  * Fix CVE-2016-2518
+
+ -- Kurt Roeckx <kurt@roeckx.be>  Sat, 07 May 2016 18:08:49 +0200
+
 ntp (1:4.2.6.p5+dfsg-7+deb8u1) jessie-security; urgency=medium
 
   * Fix CVE-2015-7850
