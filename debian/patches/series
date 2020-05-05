@@ -42,3 +42,4 @@ ntp-4.2.6p5-cve-2016-1548.patch
 ntp-4.2.6p5-cve-2016-1550.patch
 ntp-4.2.6p5-cve-2016-2516.patch
 ntp-4.2.6p5-cve-2016-2518.patch
+CVE-2020-11868.patch

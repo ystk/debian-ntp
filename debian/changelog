@@ -1,3 +1,9 @@
+ntp (1:4.2.6.p5+dfsg-7+deb8u3) jessie-security; urgency=high
+
+  * CVE-2020-11868: Prevent a denial of service attack.
+
+ -- Chris Lamb <lamby@debian.org>  Tue, 05 May 2020 10:46:14 +0100
+
 ntp (1:4.2.6.p5+dfsg-7+deb8u2) jessie-security; urgency=medium
 
   * Rename and update some patches to be closer to what's in Fedora,
